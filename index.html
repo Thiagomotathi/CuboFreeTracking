@@ -1,0 +1,153 @@
+<!doctype html>
+<html>
+  <head>
+    <title>AR Cube Markerless</title>
+    <meta charset="utf-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+
+    <!-- A-Frame básico -->
+    <script src="https://aframe.io/releases/1.3.0/aframe.min.js"></script>
+
+    <style>
+      body { margin: 0; overflow: hidden; }
+      /* Botão para iniciar a sessão AR (exigido por WebXR: precisa de gesto do usuário) */
+      #startBtn {
+        position: absolute;
+        z-index: 10;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 10px 20px;
+        background: #007bff;
+        color: #fff;
+        border-radius: 4px;
+        font-family: sans-serif;
+        border: none;
+      }
+    </style>
+  </head>
+
+  <body>
+    <!-- Botão para começar o AR -->
+    <button id="startBtn">Iniciar AR</button>
+
+    <!-- Cena A-Frame com WebXR em modo AR e hit-test habilitado -->
+    <a-scene
+      embedded
+      webxr="mode: ar; optionalFeatures: hit-test;"
+      renderer="colorManagement: true; physicallyCorrectLights: true"
+      vr-mode-ui="enabled: false">
+
+      <!-- Luz ambiente -->
+      <a-entity light="type: ambient; intensity: 0.8"></a-entity>
+      <!-- Luz direcional -->
+      <a-entity light="type: directional; intensity: 1.2" position="-1 2 1"></a-entity>
+
+      <!-- Câmera AR padrão -->
+      <a-camera></a-camera>
+
+      <!-- Retículo (anel) que mostra onde o hit test detectou uma superfície -->
+      <a-entity id="reticle"
+                geometry="primitive: ring; radiusInner: 0.04; radiusOuter: 0.05"
+                material="color: #ffffff; shader: flat"
+                rotation="-90 0 0"
+                visible="false">
+      </a-entity>
+
+      <!-- Cubo 3D que será colocado no chão; começa invisível -->
+      <a-box id="cube"
+             depth="0.2"
+             height="0.2"
+             width="0.2"
+             color="#4CC3D9"
+             visible="false">
+      </a-box>
+
+    </a-scene>
+
+    <script>
+      const sceneEl = document.querySelector('a-scene');
+      const startBtn = document.getElementById('startBtn');
+      const reticle = document.getElementById('reticle');
+      const cube = document.getElementById('cube');
+
+      let xrSession = null;     // sessão WebXR ativa
+      let hitTestSource = null; // fonte de hit test (plane detection)
+      let refSpace = null;      // espaço de referência "local"
+
+      // Clique no botão → entra em AR (em A-Frame, AR também usa enterVR)
+      startBtn.addEventListener('click', () => {
+        sceneEl.enterVR();
+        startBtn.style.display = 'none';
+      });
+
+      // Quando a cena entra em "VR" (no caso, AR por causa do webxr: mode: ar)
+      sceneEl.addEventListener('enter-vr', () => {
+        xrSession = sceneEl.renderer.xr.getSession();
+        if (!xrSession) return;
+
+        // Se o modo for "opaque", não é AR (poderia ser headset VR)
+        if (xrSession.environmentBlendMode === 'opaque') return;
+
+        // Pede espaço de referência local (posição/rotação do mundo AR)
+        xrSession.requestReferenceSpace('local').then((space) => {
+          refSpace = space;
+
+          // Espaço do "viewer" (câmera) para originar o hit test
+          xrSession.requestReferenceSpace('viewer').then((viewerSpace) => {
+            // Cria uma fonte de hit test baseada na posição da câmera
+            xrSession.requestHitTestSource({ space: viewerSpace }).then((source) => {
+              hitTestSource = source;
+            });
+          });
+        });
+
+        // Quando a sessão AR terminar, limpa estado e mostra o botão de novo
+        xrSession.addEventListener('end', () => {
+          hitTestSource = null;
+          xrSession = null;
+          reticle.setAttribute('visible', false);
+          cube.setAttribute('visible', false);
+          startBtn.style.display = 'block';
+        });
+      });
+
+      // Loop de renderização do A-Frame com acesso ao frame WebXR
+      sceneEl.renderer.setAnimationLoop((time, frame) => {
+        // Se temos frame, hitTestSource e refSpace → faz hit test
+        if (frame && hitTestSource && refSpace) {
+          const hitTestResults = frame.getHitTestResults(hitTestSource);
+
+          // Se achou pelo menos um hit (plano detectado)
+          if (hitTestResults.length > 0) {
+            const hit = hitTestResults[0];
+            const pose = hit.getPose(refSpace);
+
+            if (pose) {
+              // Pega posição do hit e move o retículo para lá
+              const pos = pose.transform.position;
+              reticle.object3D.position.set(pos.x, pos.y, pos.z);
+              reticle.setAttribute('visible', true);
+            }
+          } else {
+            // Se não teve hit nessa frame, esconde o retículo
+            reticle.setAttribute('visible', false);
+          }
+        }
+      });
+
+      // Clique na cena → posiciona o cubo onde está o retículo
+      sceneEl.addEventListener('click', () => {
+        // Só faz algo se o retículo estiver visível (ou seja, tem plano detectado)
+        if (!reticle.getAttribute('visible')) return;
+
+        const pos = reticle.object3D.position;
+        // Copia a posição do retículo para o cubo
+        cube.object3D.position.copy(pos);
+        cube.setAttribute('visible', true);
+      });
+    </script>
+  </body>
+</html>
+```
